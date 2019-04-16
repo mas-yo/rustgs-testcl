@@ -8,3 +8,4 @@ edition = "2018"
 tokio = "0.1.14"
 bytes = "0.4.11"
 rand = "*"
+uuid = { version = "0.7", features = ["v4"] }
