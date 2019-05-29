@@ -10,3 +10,4 @@ bytes = "0.4.11"
 rand = "*"
 uuid = { version = "0.7", features = ["v4"] }
 futures = "0.1.25"
+lazy_static = "1.2.0"
