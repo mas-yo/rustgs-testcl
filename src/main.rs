@@ -13,11 +13,12 @@ mod command;
 
 use crate::command::*;
 
-fn start_client(addr: &str, id:u32) {
+fn start_client(addr: String, id:u32, name: String, tx_next: futures::sync::mpsc::Sender<(u32,String)>) {
     let addr = format!("{}:18290", addr).parse().unwrap();
+    let name2 = name.clone();
 
-    let mut rng = rand::thread_rng();
-    let name:String = Uuid::new_v4().to_hyphenated().to_string();
+    // let mut rng = rand::thread_rng();
+    // let name:String = Uuid::new_v4().to_hyphenated().to_string();
     let bye_text = format!("bye {}", name);
 
 //    let name = format!("{}", name);
@@ -30,14 +31,21 @@ fn start_client(addr: &str, id:u32) {
             match cmd {
                 S2C::ShowUI(uiid,show) if *uiid==1001 => {
                     tx.send(C2S::TouchUI(1001)).unwrap();
-                    tx.flush();
+                    if let Err(e) = tx.flush() {
+                        println!("disconnect. {} err {}", id, e);
+                        return Ok(false);
+                    }
                 },
                 S2C::RequestLoginInfo => {
+                    println!("request login");
                     tx.send(C2S::ResponseLoginInfo(name.clone())).unwrap();
-                    tx.flush();
+                    if let Err(e) = tx.flush() {
+                        println!("disconnect. {} err {}", id, e);
+                        return Ok(false);
+                    }
                 },
                 S2C::ShowUI(uiid,show) if *uiid==2 => {
-                    // println!("recv show ui 2");
+                    println!("recv show ui 2");
                     for i in 0..10 { //ここが大きすぎると返事がこない
                         let mut text = (0..10).map(|_|"X").collect::<String>();
                         // text.insert_str(0, &text.clone());
@@ -45,11 +53,17 @@ fn start_client(addr: &str, id:u32) {
                         // text.insert_str(0, &text.clone());
                         // text.insert_str(0, &text.clone());
                         tx.send(C2S::InputText(text)).unwrap();
-                        tx.flush();
+                        if let Err(e) = tx.flush() {
+                            println!("disconnect. {} err {}", id, e);
+                            return Ok(false);
+                        }
                     }
                     tx.send(C2S::InputText(bye_text.clone())).unwrap();
-                    tx.flush();
-                    println!("send bye");
+                    if let Err(e) = tx.flush() {
+                        println!("disconnect. {} err {}", id, e);
+                        return Ok(false);
+                    }
+                    // println!("send bye");
                     // return Ok(false);
                 },
                 S2C::AddText(uiid,text) => {
@@ -63,7 +77,12 @@ fn start_client(addr: &str, id:u32) {
             }
             Ok(true)
         }).for_each(|_|Ok(()))
-        .map_err(|_|());
+        .map_err(|_|())
+        .then(move|_|{
+            tx_next.wait().send((id, name2));
+            Ok(())
+        });
+
         tokio::spawn(receive);
         Ok(())
     })
@@ -78,16 +97,29 @@ fn start_client(addr: &str, id:u32) {
 pub fn main() -> Result<(), Box<std::error::Error>> {
 
     let args:Vec<String> = env::args().collect();
-    let task = Ok(()).into_future().and_then(move|_|{
-        let addr = &args[1];
-        for i in 0..500 {
-            start_client(addr, i);
-        }
-        Ok(())
-    });
+    let addr = args[1].clone();
+
+    let (tx,rx) = futures::sync::mpsc::channel::<(u32,String)>(32);
+    let tx2 = tx.clone();
+
+    let mut ids = Vec::new();
+    for i in 0..100 {
+        ids.push(format!("user{:>04}", i));
+    }
+
+    let mut wait = tx.wait();
+    for i in 0..1 {
+        wait.send((i, ids[i as usize].clone()));
+    }
     // .map_err(|_|());
 
-    tokio::run(task);
+    {
+        let start = rx.for_each(move|(id,name)| {
+            start_client(addr.clone(), id, name, tx2.clone());
+            Ok(())
+        }); 
+        tokio::run(start);
+    }
 
     Ok(())
 }
