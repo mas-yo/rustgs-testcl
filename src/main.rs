@@ -35,6 +35,8 @@ fn start_client(addr: String, id:u32, name: String, tx_next: futures::sync::mpsc
 
 //    let name = format!("{}", name);
     let client = TcpStream::connect(&addr).and_then(move|stream| {
+        stream.set_nodelay(true);
+        println!("connected");
         let framed = Framed::new(stream, Codec::default());
         let (tx,rx) = framed.split();
         let mut tx = tx.wait();
@@ -45,7 +47,10 @@ fn start_client(addr: String, id:u32, name: String, tx_next: futures::sync::mpsc
             // println!("recv {:?}", cmd);
             match cmd {
                 S2C::ShowUI(uiid,show) if *uiid==1001 => {
-                    tx.send(C2S::TouchUI(1001)).unwrap();
+                    if let Err(e) = tx.send(C2S::TouchUI(1001)) {
+                        println!("disconnect. {} err {}", id, e);
+                        return Ok(false);
+                    }
                     if let Err(e) = tx.flush() {
                         println!("disconnect. {} err {}", id, e);
                         return Ok(false);
@@ -53,37 +58,47 @@ fn start_client(addr: String, id:u32, name: String, tx_next: futures::sync::mpsc
                 },
                 S2C::RequestLoginInfo => {
                     // println!("request login");
-                    tx.send(C2S::ResponseLoginInfo(name.clone())).unwrap();
+                    if let Err(e) = tx.send(C2S::ResponseLoginInfo(name.clone())) {
+                        println!("disconnect. {} err {}", id, e);
+                        return Ok(false);
+                    }
                     if let Err(e) = tx.flush() {
                         println!("disconnect. {} err {}", id, e);
                         return Ok(false);
                     }
                 },
                 S2C::ShowUI(uiid,show) if *uiid==2 => {
-                    // println!("recv show ui 2");
-                    for _ in 0..10 { //ここが大きすぎると返事がこない
+                    println!("recv show ui 2");
+                    for _ in 0..1 { //ここが大きすぎると返事がこない
                         let text = (0..10).map(|_|"X").collect::<String>();
                         // text.insert_str(0, &text.clone());
                         // text.insert_str(0, &text.clone());
                         // text.insert_str(0, &text.clone());
                         // text.insert_str(0, &text.clone());
-                        tx.send(C2S::InputText(text)).unwrap();
+                        if let Err(e) = tx.send(C2S::InputText(text)) {
+                            println!("disconnect. {} err {}", id, e);
+                            return Ok(false);
+                        }
+                        println!("send msg");
                         if let Err(e) = tx.flush() {
                             println!("disconnect. {} err {}", id, e);
                             return Ok(false);
                         }
+                        println!("flushed");
                     }
                     tx.send(C2S::InputText(bye_text.clone())).unwrap();
+                    println!("send bye");
                     if let Err(e) = tx.flush() {
                         println!("disconnect. {} err {}", id, e);
                         return Ok(false);
                     }
+                    println!("flushed bye");
                     send_at = Some(std::time::SystemTime::now());
                     // println!("send bye");
                     // return Ok(false);
                 },
                 S2C::AddText(uiid,text) => {
-                    // println!("{:?} recv characters: {}", std::time::SystemTime::now(), text.len(), );
+                    println!("{:?} recv characters: {}", std::time::SystemTime::now(), text.len(), );
                     if text.ends_with(&bye_text) {
                         let mut t: u128 = 0;
                         if let Some(at) = send_at {
@@ -99,6 +114,7 @@ fn start_client(addr: String, id:u32, name: String, tx_next: futures::sync::mpsc
                             }
                         }
                         println!("disconnect. {} time {}", id, t);
+                        std::thread::sleep(std::time::Duration::from_secs(1));
                         return Ok(false);
                     }
                 }
@@ -108,7 +124,9 @@ fn start_client(addr: String, id:u32, name: String, tx_next: futures::sync::mpsc
         }).for_each(|_|Ok(()))
         .map_err(|_|())
         .then(move|_|{
-            tx_next.wait().send((id, name2));
+            if let Err(e) = tx_next.wait().send((id, name2)) {
+                println!("room nexe send err {}", e);
+            }
             Ok(())
         });
 
@@ -119,7 +137,7 @@ fn start_client(addr: String, id:u32, name: String, tx_next: futures::sync::mpsc
         println!("connection error = {:?}", err);
     });
 
-    // println!("start client {}", id);
+    println!("start client {}", id);
     tokio::spawn(client);
 }
 
@@ -137,8 +155,10 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
     }
 
     let mut wait = tx.wait();
-    for i in 0..100 {
-        wait.send((i, ids[i as usize].clone()));
+    for i in 0..1 {
+        if let Err(e) = wait.send((i, ids[i as usize].clone())) {
+            println!("first send room err {}", e);
+        }
     }
     // .map_err(|_|());
 
@@ -151,13 +171,15 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
             Ok(())
         })
         .map_err(|_|());
-        tokio::spawn(task);
+        // tokio::spawn(task);
         Ok(())
     });
     {
         let start = rx.for_each(move|(id,name)| {
             start_client(addr.clone(), id, name, tx2.clone());
             Ok(())
+        }).and_then(|_|{
+            println!("END");Ok(())
         }); 
         tokio::run(report_time.and_then(|_| start));
     }
