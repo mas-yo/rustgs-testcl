@@ -5,7 +5,7 @@ authors = ["Masahiro Yoshida <mypianoplayer@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-tokio = "0.1.14"
+tokio = "0.1.20"
 bytes = "0.4.11"
 rand = "*"
 uuid = { version = "0.7", features = ["v4"] }

@@ -114,7 +114,7 @@ fn start_client(addr: String, id:u32, name: String, tx_next: futures::sync::mpsc
                             }
                         }
                         println!("disconnect. {} time {}", id, t);
-                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        std::thread::sleep(std::time::Duration::from_millis(10));
                         return Ok(false);
                     }
                 }
@@ -155,7 +155,7 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
     }
 
     let mut wait = tx.wait();
-    for i in 0..1 {
+    for i in 0..50 {
         if let Err(e) = wait.send((i, ids[i as usize].clone())) {
             println!("first send room err {}", e);
         }
