@@ -3,7 +3,6 @@ use bytes::BytesMut;
 use tokio::codec::{Decoder, Encoder, Framed};
 use tokio::io;
 
-
 use std::str::*;
 
 pub(crate) type UIID = u64;
@@ -85,10 +84,20 @@ impl FromStr for S2C {
                 return Ok(S2C::Message(splitted.get(1).unwrap().to_string()));
             }
             if *cmd == "show_ui" {
-                return Ok(S2C::ShowUI(splitted.get(1).unwrap().parse::<UIID>().unwrap(), if *splitted.get(2).unwrap() == "0" { false } else { true} ));
+                return Ok(S2C::ShowUI(
+                    splitted.get(1).unwrap().parse::<UIID>().unwrap(),
+                    if *splitted.get(2).unwrap() == "0" {
+                        false
+                    } else {
+                        true
+                    },
+                ));
             }
             if *cmd == "add_text" {
-                return Ok(S2C::AddText(splitted.get(1).unwrap().parse::<UIID>().unwrap(), splitted.get(2).unwrap().to_string()));
+                return Ok(S2C::AddText(
+                    splitted.get(1).unwrap().parse::<UIID>().unwrap(),
+                    splitted.get(2).unwrap().to_string(),
+                ));
             }
             return Ok(S2C::Message("".to_string()));
         }
@@ -96,8 +105,6 @@ impl FromStr for S2C {
         Err(())
     }
 }
-
-
 
 #[derive(Default)]
 pub struct Codec {
@@ -115,7 +122,6 @@ impl Decoder for Codec {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, io::Error> {
-
         // Look for a byte with the value '\n' in buf. Start searching from the search start index.
         if let Some(newline_offset) = buf[self.next_index..].iter().position(|b| *b == b'\n') {
             let newline_index = newline_offset + self.next_index;
