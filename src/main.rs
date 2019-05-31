@@ -30,7 +30,6 @@ fn start_client(
     let addr = format!("{}:18290", addr).parse().unwrap();
     let name2 = name.clone();
 
-    // let mut rng = rand::thread_rng();
     // let name:String = Uuid::new_v4().to_hyphenated().to_string();
     let bye_text = format!("bye {}", name);
 
@@ -41,102 +40,121 @@ fn start_client(
             println!("connected");
             let framed = Framed::new(stream, Codec::default());
             let (tx, rx) = framed.split();
-            let mut tx = tx.wait();
-            let mut send_at = None;
+            let mut tx = Arc::new(Mutex::new(tx.wait()));
+            // let mut tx2 = tx.clone();
+            // let mut send_at = None;
 
             let receive = rx
                 .take_while(move |cmd| {
                     // println!("recv {:?}", cmd);
                     match cmd {
                         S2C::ShowUI(uiid, show) if *uiid == 1001 => {
-                            if let Err(e) = tx.send(C2S::TouchUI(1001)) {
+                            if let Err(e) = tx.lock().unwrap().send(C2S::TouchUI(1001)) {
                                 println!("disconnect. {} err {}", id, e);
                                 return Ok(false);
                             }
-                            if let Err(e) = tx.flush() {
+                            if let Err(e) = tx.lock().unwrap().flush() {
                                 println!("disconnect. {} err {}", id, e);
                                 return Ok(false);
                             }
                         }
                         S2C::RequestLoginInfo => {
                             // println!("request login");
-                            if let Err(e) = tx.send(C2S::ResponseLoginInfo(name.clone())) {
+                            if let Err(e) = tx.lock().unwrap().send(C2S::ResponseLoginInfo(name.clone())) {
                                 println!("disconnect. {} err {}", id, e);
                                 return Ok(false);
                             }
-                            if let Err(e) = tx.flush() {
+                            if let Err(e) = tx.lock().unwrap().flush() {
                                 println!("disconnect. {} err {}", id, e);
                                 return Ok(false);
                             }
                         }
                         S2C::ShowUI(uiid, show) if *uiid == 2 => {
-                            println!("recv show ui 2");
-                            for _ in 0..1 {
-                                //ここが大きすぎると返事がこない
-                                let text = (0..10).map(|_| "X").collect::<String>();
-                                // text.insert_str(0, &text.clone());
-                                // text.insert_str(0, &text.clone());
-                                // text.insert_str(0, &text.clone());
-                                // text.insert_str(0, &text.clone());
-                                if let Err(e) = tx.send(C2S::InputText(text)) {
-                                    println!("disconnect. {} err {}", id, e);
-                                    return Ok(false);
+                            // println!("recv show ui 2");
+                            let tx2 = tx.clone();
+                            let interval = tokio::timer::Interval::new(std::time::Instant::now(), std::time::Duration::from_millis(10))
+                            .for_each(move|_|{
+                                let n:u32 = rand::random::<u32>() % 10;// rng.gen_range(0,10);
+                                if n == 0 {
+                                    let l:u32 = rand::random::<u32>() % 200 + 20; //rng.gen_range(20, 200);
+                                    let text = (0..l).map(|_| "X").collect::<String>();
+                                    if let Err(e) = tx2.lock().unwrap().send(C2S::InputText(text)) {
+                                        println!("send error {}", e);
+                                    }
+                                    if let Err(e) = tx2.lock().unwrap().flush() {
+                                        println!("flush error {}", e);
+                                    }
                                 }
-                                println!("send msg");
-                                if let Err(e) = tx.flush() {
-                                    println!("disconnect. {} err {}", id, e);
-                                    return Ok(false);
-                                }
-                                println!("flushed");
-                            }
-                            tx.send(C2S::InputText(bye_text.clone())).unwrap();
-                            println!("send bye");
-                            if let Err(e) = tx.flush() {
-                                println!("disconnect. {} err {}", id, e);
-                                return Ok(false);
-                            }
-                            println!("flushed bye");
-                            send_at = Some(std::time::SystemTime::now());
+                                Ok(())
+                            })
+                            .map_err(|_|());
+                            tokio::spawn(interval);
+                            // for _ in 0..1 {
+                            //     //ここが大きすぎると返事がこない
+                            //     let text = (0..10).map(|_| "X").collect::<String>();
+                            //     // text.insert_str(0, &text.clone());
+                            //     // text.insert_str(0, &text.clone());
+                            //     // text.insert_str(0, &text.clone());
+                            //     // text.insert_str(0, &text.clone());
+                            //     if let Err(e) = tx.send(C2S::InputText(text)) {
+                            //         println!("disconnect. {} err {}", id, e);
+                            //         return Ok(false);
+                            //     }
+                            //     println!("send msg");
+                            //     if let Err(e) = tx.flush() {
+                            //         println!("disconnect. {} err {}", id, e);
+                            //         return Ok(false);
+                            //     }
+                            //     println!("flushed");
+                            // }
+                            // tx.send(C2S::InputText(bye_text.clone())).unwrap();
+                            // println!("send bye");
+                            // if let Err(e) = tx.flush() {
+                            //     println!("disconnect. {} err {}", id, e);
+                            //     return Ok(false);
+                            // }
+                            // println!("flushed bye");
+                            // send_at = Some(std::time::SystemTime::now());
                             // println!("send bye");
                             // return Ok(false);
                         }
                         S2C::AddText(uiid, text) => {
-                            println!(
-                                "{:?} recv characters: {}",
-                                std::time::SystemTime::now(),
-                                text.len(),
-                            );
-                            if text.ends_with(&bye_text) {
-                                let mut t: u128 = 0;
-                                if let Some(at) = send_at {
-                                    let time = at.elapsed().unwrap();
-                                    t = time.as_millis();
-                                    {
-                                        let mut lock = CONNS_COUNT.lock().unwrap();
-                                        *lock += 1;
-                                    }
-                                    {
-                                        let mut lock = TIME_SUM.lock().unwrap();
-                                        *lock += t;
-                                    }
-                                }
-                                println!("disconnect. {} time {}", id, t);
-                                std::thread::sleep(std::time::Duration::from_millis(10));
-                                return Ok(false);
-                            }
+                            // println!(
+                            //     "{:?} recv characters: {}",
+                            //     std::time::SystemTime::now(),
+                            //     text.len(),
+                            // );
+                            // if text.ends_with(&bye_text) {
+                            //     let mut t: u128 = 0;
+                            //     if let Some(at) = send_at {
+                            //         let time = at.elapsed().unwrap();
+                            //         t = time.as_millis();
+                            //         {
+                            //             let mut lock = CONNS_COUNT.lock().unwrap();
+                            //             *lock += 1;
+                            //         }
+                            //         {
+                            //             let mut lock = TIME_SUM.lock().unwrap();
+                            //             *lock += t;
+                            //         }
+                            //     }
+                            //     println!("disconnect. {} time {}", id, t);
+                            //     std::thread::sleep(std::time::Duration::from_millis(10));
+                            //     return Ok(false);
+                            // }
                         }
                         _ => {}
                     }
                     Ok(true)
                 })
-                .for_each(|_| Ok(()))
-                .map_err(|_| ())
-                .then(move |_| {
-                    if let Err(e) = tx_next.wait().send((id, name2)) {
-                        println!("room nexe send err {}", e);
-                    }
-                    Ok(())
-                });
+                .for_each(|s|Ok(()))
+                .map_err(|_| ());
+                // .then(move |_| {
+                //     if let Err(e) = tx_next.wait().send((id, name2)) {
+                //         println!("room nexe send err {}", e);
+                //     }
+                //     Ok(())
+                // });
 
             tokio::spawn(receive);
             Ok(())
@@ -162,7 +180,7 @@ pub fn main() -> Result<(), Box<std::error::Error>> {
     }
 
     let mut wait = tx.wait();
-    for i in 0..50 {
+    for i in 0..49 {
         if let Err(e) = wait.send((i, ids[i as usize].clone())) {
             println!("first send room err {}", e);
         }
